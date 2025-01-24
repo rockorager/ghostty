@@ -288,7 +288,7 @@ pub const Action = union(enum) {
     /// selection exists.
     ///
     /// Arguments:
-    ///   - left, right, up, down, page_up, page_down, home, end,
+    ///   - AdjustSelection: left, right, up, down, page_up, page_down, home, end,
     ///     beginning_of_line, end_of_line
     ///
     /// Example: Extend selection to the right
@@ -351,7 +351,7 @@ pub const Action = union(enum) {
     /// Create a new split in the given direction.
     ///
     /// Arguments:
-    ///   - right, down, left, up, auto (splits along the larger direction)
+    ///   - SplitDirection: right, down, left, up, auto (along the larger dir)
     ///
     /// Example: Create split on the right
     ///   keybind = cmd+shift+d=new_split:right
@@ -360,7 +360,7 @@ pub const Action = union(enum) {
     /// Focus a split in a given direction.
     ///
     /// Arguments:
-    ///   - previous, next, up, left, down, right
+    ///   - SplitFocusDirection: previous, next, up, left, down, right
     ///
     /// Example: Focus split on the right
     ///   keybind = cmd+right=goto_split:right
@@ -372,8 +372,8 @@ pub const Action = union(enum) {
     /// Resize the current split in a given direction.
     ///
     /// Arguments:
-    ///   - up, down, left, right
-    ///   - the number of pixels to resize the split by
+    ///   - SplitResizeDirection: up, down, left, right
+    ///   - The number of pixels to resize the split by
     ///
     /// Example: Move divider up 10 pixels
     ///   keybind = cmd+shift+up=resize_split:up,10
@@ -385,7 +385,7 @@ pub const Action = union(enum) {
     /// Control the terminal inspector visibility.
     ///
     /// Arguments:
-    ///   - toggle, show, hide
+    ///   - InspectorMode: toggle, show, hide
     ///
     /// Example: Toggle inspector visibility
     ///   keybind = cmd+i=inspector:toggle
