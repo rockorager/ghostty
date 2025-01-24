@@ -10,3 +10,4 @@ pub const Surface = @import("Surface.zig");
 pub const config = @import("config.zig");
 pub const gl = @import("opengl");
 pub const termio = @import("termio.zig");
+pub const os = @import("os/main.zig");
