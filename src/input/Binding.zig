@@ -288,7 +288,7 @@ pub const Action = union(enum) {
     /// selection exists.
     ///
     /// Arguments:
-    ///   - AdjustSelection: left, right, up, down, page_up, page_down, home, end,
+    ///   - left, right, up, down, page_up, page_down, home, end,
     ///     beginning_of_line, end_of_line
     ///
     /// Example: Extend selection to the right
