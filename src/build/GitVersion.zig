@@ -17,10 +17,15 @@ branch: []const u8,
 /// Initialize the version and detect it from the Git environment. This
 /// allocates using the build allocator and doesn't free.
 pub fn detect(b: *std.Build) !Version {
+    // Use the directory containing this file to find ghostty's git root,
+    // not b.build_root which points to the downstream project when ghostty
+    // is used as a dependency.
+    const src_root = comptime std.fs.path.dirname(std.fs.path.dirname(@src().file).?).?;
+
     // Execute a bunch of git commands to determine the automatic version.
     var code: u8 = 0;
     const branch: []const u8 = b.runAllowFail(
-        &[_][]const u8{ "git", "-C", b.build_root.path orelse ".", "rev-parse", "--abbrev-ref", "HEAD" },
+        &[_][]const u8{ "git", "-C", src_root, "rev-parse", "--abbrev-ref", "HEAD" },
         &code,
         .Ignore,
     ) catch |err| switch (err) {
@@ -31,7 +36,7 @@ pub fn detect(b: *std.Build) !Version {
 
     const short_hash = short_hash: {
         const output = b.runAllowFail(
-            &[_][]const u8{ "git", "-C", b.build_root.path orelse ".", "log", "--pretty=format:%h", "-n", "1" },
+            &[_][]const u8{ "git", "-C", src_root, "log", "--pretty=format:%h", "-n", "1" },
             &code,
             .Ignore,
         ) catch |err| switch (err) {
@@ -43,7 +48,7 @@ pub fn detect(b: *std.Build) !Version {
     };
 
     const tag = b.runAllowFail(
-        &[_][]const u8{ "git", "-C", b.build_root.path orelse ".", "describe", "--exact-match", "--tags" },
+        &[_][]const u8{ "git", "-C", src_root, "describe", "--exact-match", "--tags" },
         &code,
         .Ignore,
     ) catch |err| switch (err) {
@@ -55,7 +60,7 @@ pub fn detect(b: *std.Build) !Version {
     _ = b.runAllowFail(&[_][]const u8{
         "git",
         "-C",
-        b.build_root.path orelse ".",
+        src_root,
         "diff",
         "--quiet",
         "--exit-code",
