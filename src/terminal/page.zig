@@ -43,7 +43,7 @@ const AllocPosix = struct {
         return try posix.mmap(
             null,
             n,
-            posix.PROT.READ | posix.PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
             -1,
             0,
@@ -2044,12 +2044,18 @@ pub const Cell = packed struct(u64) {
         /// The codepoint that this cell contains. If `grapheme` is false,
         /// then this is the only codepoint in the cell. If `grapheme` is
         /// true, then this is the first codepoint in the grapheme cluster.
-        codepoint: u21,
+        codepoint: packed struct(u24) {
+            data: u21,
+            _pad: u3 = 0,
+        },
 
         /// The content is an empty cell with a background color.
-        color_palette: u8,
+        color_palette: packed struct(u24) {
+            data: u8,
+            _pad: u16 = 0,
+        },
         color_rgb: RGB,
-    } = .{ .codepoint = 0 },
+    } = .{ .codepoint = .{ .data = 0 } },
 
     /// The style ID to use for this cell within the style map. Zero
     /// is always the default style so no lookup is required.
@@ -2146,7 +2152,7 @@ pub const Cell = packed struct(u64) {
         // memory in the packed union. Valgrind verifies this.
         var cell: Cell = @bitCast(@as(u64, 0));
         cell.content_tag = .codepoint;
-        cell.content = .{ .codepoint = cp };
+        cell.content = .{ .codepoint = .{ .data = cp } };
         return cell;
     }
 
@@ -2164,7 +2170,7 @@ pub const Cell = packed struct(u64) {
         return switch (self.content_tag) {
             .codepoint,
             .codepoint_grapheme,
-            => self.content.codepoint != 0,
+            => self.content.codepoint.data != 0,
 
             .bg_color_palette,
             .bg_color_rgb,
@@ -2176,7 +2182,7 @@ pub const Cell = packed struct(u64) {
         return switch (self.content_tag) {
             .codepoint,
             .codepoint_grapheme,
-            => self.content.codepoint,
+            => self.content.codepoint.data,
 
             .bg_color_palette,
             .bg_color_rgb,
@@ -2664,14 +2670,16 @@ test "Page read and write cells" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y) },
+            .content = .{
+                .codepoint = .{ .data = @intCast(y) },
+            },
         };
     }
 
     // Read it again
     for (0..page.capacity.rows) |y| {
         const rac = page.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
 }
 
@@ -2765,7 +2773,7 @@ test "Page clone" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y) },
+            .content = .{ .codepoint = .{ .data = @intCast(y) } },
         };
     }
 
@@ -2777,7 +2785,7 @@ test "Page clone" {
     // Read it again
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
 
     // Write again
@@ -2785,20 +2793,20 @@ test "Page clone" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = 0 },
+            .content = .{ .codepoint = .{ .data = 0 } },
         };
     }
 
     // Read it again, should be unchanged
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
 
     // Read the original
     for (0..page.capacity.rows) |y| {
         const rac = page.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
     }
 }
 
@@ -2848,7 +2856,7 @@ test "Page clone styles" {
             rac.row.styled = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast(x + 1) },
+                .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
                 .style_id = id,
             };
             page.styles.use(page.memory, id);
@@ -2893,7 +2901,7 @@ test "Page cloneFrom" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y) },
+            .content = .{ .codepoint = .{ .data = @intCast(y) } },
         };
     }
 
@@ -2909,7 +2917,7 @@ test "Page cloneFrom" {
     // Read it again
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
 
     // Write again
@@ -2917,20 +2925,20 @@ test "Page cloneFrom" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = 0 },
+            .content = .{ .codepoint = .{ .data = 0 } },
         };
     }
 
     // Read it again, should be unchanged
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
 
     // Read the original
     for (0..page.capacity.rows) |y| {
         const rac = page.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
     }
 }
 
@@ -2947,7 +2955,7 @@ test "Page cloneFrom shrink columns" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y) },
+            .content = .{ .codepoint = .{ .data = @intCast(y) } },
         };
     }
 
@@ -2964,7 +2972,7 @@ test "Page cloneFrom shrink columns" {
     // Read it again
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
 }
 
@@ -2981,7 +2989,7 @@ test "Page cloneFrom partial" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y) },
+            .content = .{ .codepoint = .{ .data = @intCast(y) } },
         };
     }
 
@@ -2997,11 +3005,11 @@ test "Page cloneFrom partial" {
     // Read it again
     for (0..5) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint.data);
     }
     for (5..page2.size.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
     }
 }
 
@@ -3028,7 +3036,7 @@ test "Page cloneFrom hyperlinks exact capacity" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 42 },
+                .content = .{ .codepoint = .{ .data = 42 } },
             };
             try page.setHyperlink(rac.row, rac.cell, hyperlink_id);
             page.hyperlink_set.use(page.memory, hyperlink_id);
@@ -3062,7 +3070,7 @@ test "Page cloneFrom graphemes" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(y + 1) } },
         };
         try page.appendGrapheme(rac.row, rac.cell, 0x0A);
     }
@@ -3079,7 +3087,7 @@ test "Page cloneFrom graphemes" {
     // Read it again
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y + 1)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y + 1)), rac.cell.content.codepoint.data);
         try testing.expect(rac.row.grapheme);
         try testing.expect(rac.cell.hasGrapheme());
         try testing.expectEqualSlices(u21, &.{0x0A}, page2.lookupGrapheme(rac.cell).?);
@@ -3092,14 +3100,14 @@ test "Page cloneFrom graphemes" {
         page.updateRowGraphemeFlag(rac.row);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = 0 },
+            .content = .{ .codepoint = .{ .data = 0 } },
         };
     }
 
     // Read it again, should be unchanged
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y + 1)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y + 1)), rac.cell.content.codepoint.data);
         try testing.expect(rac.row.grapheme);
         try testing.expect(rac.cell.hasGrapheme());
         try testing.expectEqualSlices(u21, &.{0x0A}, page2.lookupGrapheme(rac.cell).?);
@@ -3108,7 +3116,7 @@ test "Page cloneFrom graphemes" {
     // Read the original
     for (0..page.capacity.rows) |y| {
         const rac = page.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint.data);
     }
 }
 
@@ -3123,7 +3131,7 @@ test "Page cloneFrom frees dst graphemes" {
         const rac = page.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(y + 1) } },
         };
     }
 
@@ -3138,7 +3146,7 @@ test "Page cloneFrom frees dst graphemes" {
         const rac = page2.getRowAndCell(1, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(y + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(y + 1) } },
         };
         try page2.appendGrapheme(rac.row, rac.cell, 0x0A);
     }
@@ -3149,7 +3157,7 @@ test "Page cloneFrom frees dst graphemes" {
     // Read it again
     for (0..page2.capacity.rows) |y| {
         const rac = page2.getRowAndCell(1, y);
-        try testing.expectEqual(@as(u21, @intCast(y + 1)), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, @intCast(y + 1)), rac.cell.content.codepoint.data);
         try testing.expect(!rac.row.grapheme);
         try testing.expect(!rac.cell.hasGrapheme());
     }
@@ -3171,7 +3179,7 @@ test "Page cloneRowFrom partial" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast(x + 1) },
+                .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             };
         }
     }
@@ -3197,7 +3205,7 @@ test "Page cloneRowFrom partial" {
         for (0..page2.size.cols) |x| {
             const expected: u21 = if (x >= 2 and x < 8) @intCast(x + 1) else 0;
             const rac = page2.getRowAndCell(x, y);
-            try testing.expectEqual(expected, rac.cell.content.codepoint);
+            try testing.expectEqual(expected, rac.cell.content.codepoint.data);
         }
     }
 }
@@ -3217,7 +3225,7 @@ test "Page cloneRowFrom partial grapheme in non-copied source region" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast(x + 1) },
+                .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             };
         }
         {
@@ -3252,7 +3260,7 @@ test "Page cloneRowFrom partial grapheme in non-copied source region" {
         for (0..page2.size.cols) |x| {
             const expected: u21 = if (x >= 2 and x < 8) @intCast(x + 1) else 0;
             const rac = page2.getRowAndCell(x, y);
-            try testing.expectEqual(expected, rac.cell.content.codepoint);
+            try testing.expectEqual(expected, rac.cell.content.codepoint.data);
             try testing.expect(!rac.cell.hasGrapheme());
         }
         {
@@ -3278,7 +3286,7 @@ test "Page cloneRowFrom partial grapheme in non-copied dest region" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast(x + 1) },
+                .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             };
         }
     }
@@ -3297,7 +3305,7 @@ test "Page cloneRowFrom partial grapheme in non-copied dest region" {
             const rac = page2.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0xBB },
+                .content = .{ .codepoint = .{ .data = 0xBB } },
             };
         }
         {
@@ -3323,7 +3331,7 @@ test "Page cloneRowFrom partial grapheme in non-copied dest region" {
         for (0..page2.size.cols) |x| {
             const expected: u21 = if (x >= 2 and x < 8) @intCast(x + 1) else 0xBB;
             const rac = page2.getRowAndCell(x, y);
-            try testing.expectEqual(expected, rac.cell.content.codepoint);
+            try testing.expectEqual(expected, rac.cell.content.codepoint.data);
         }
         {
             const rac = page2.getRowAndCell(9, y);
@@ -3351,7 +3359,7 @@ test "Page cloneRowFrom partial hyperlink in same page copy" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast(x + 1) },
+                .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             };
         }
 
@@ -3378,7 +3386,7 @@ test "Page cloneRowFrom partial hyperlink in same page copy" {
         for (0..page.size.cols) |x| {
             const expected: u21 = if (x >= 2 and x < 8) @intCast(x + 1) else 0;
             const rac = page.getRowAndCell(x, y);
-            try testing.expectEqual(expected, rac.cell.content.codepoint);
+            try testing.expectEqual(expected, rac.cell.content.codepoint.data);
         }
         {
             const rac = page.getRowAndCell(7, y);
@@ -3407,7 +3415,7 @@ test "Page cloneRowFrom partial hyperlink in same page omit" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast(x + 1) },
+                .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             };
         }
 
@@ -3434,7 +3442,7 @@ test "Page cloneRowFrom partial hyperlink in same page omit" {
         for (0..page.size.cols) |x| {
             const expected: u21 = if (x >= 2 and x < 6) @intCast(x + 1) else 0;
             const rac = page.getRowAndCell(x, y);
-            try testing.expectEqual(expected, rac.cell.content.codepoint);
+            try testing.expectEqual(expected, rac.cell.content.codepoint.data);
         }
         {
             const rac = page.getRowAndCell(7, y);
@@ -3458,7 +3466,7 @@ test "Page moveCells text-only" {
         const rac = page.getRowAndCell(x, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(x + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
         };
     }
 
@@ -3471,7 +3479,7 @@ test "Page moveCells text-only" {
         const rac = page.getRowAndCell(x, 1);
         try testing.expectEqual(
             @as(u21, @intCast(x + 1)),
-            rac.cell.content.codepoint,
+            rac.cell.content.codepoint.data,
         );
     }
 
@@ -3480,7 +3488,7 @@ test "Page moveCells text-only" {
         const rac = page.getRowAndCell(x, 0);
         try testing.expectEqual(
             @as(u21, 0),
-            rac.cell.content.codepoint,
+            rac.cell.content.codepoint.data,
         );
     }
 }
@@ -3498,7 +3506,7 @@ test "Page moveCells graphemes" {
         const rac = page.getRowAndCell(x, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(x + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
         };
         try page.appendGrapheme(rac.row, rac.cell, 0x0A);
     }
@@ -3514,7 +3522,7 @@ test "Page moveCells graphemes" {
         const rac = page.getRowAndCell(x, 1);
         try testing.expectEqual(
             @as(u21, @intCast(x + 1)),
-            rac.cell.content.codepoint,
+            rac.cell.content.codepoint.data,
         );
         try testing.expectEqualSlices(
             u21,
@@ -3528,7 +3536,7 @@ test "Page moveCells graphemes" {
         const rac = page.getRowAndCell(x, 0);
         try testing.expectEqual(
             @as(u21, 0),
-            rac.cell.content.codepoint,
+            rac.cell.content.codepoint.data,
         );
     }
 }
@@ -3550,7 +3558,7 @@ test "Page verifyIntegrity graphemes good" {
         const rac = page.getRowAndCell(x, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(x + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
         };
         try page.appendGrapheme(rac.row, rac.cell, 0x0A);
     }
@@ -3575,7 +3583,7 @@ test "Page verifyIntegrity grapheme row not marked" {
         const rac = page.getRowAndCell(x, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(x + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
         };
         try page.appendGrapheme(rac.row, rac.cell, 0x0A);
     }
@@ -3612,7 +3620,7 @@ test "Page verifyIntegrity styles good" {
         rac.row.styled = true;
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(x + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             .style_id = id,
         };
         page.styles.use(page.memory, id);
@@ -3648,7 +3656,7 @@ test "Page verifyIntegrity styles ref count mismatch" {
         rac.row.styled = true;
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = @intCast(x + 1) },
+            .content = .{ .codepoint = .{ .data = @intCast(x + 1) } },
             .style_id = id,
         };
         page.styles.use(page.memory, id);
