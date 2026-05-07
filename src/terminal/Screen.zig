@@ -32,6 +32,9 @@ pub const CursorStyle = @import("cursor.zig").Style;
 
 const log = std.log.scoped(.screen);
 
+/// The I/O implementation to use for any operation that requires one.
+io: std.Io,
+
 /// The general purpose allocator to use for all memory allocations.
 /// Unfortunately some screen operations do require allocation.
 alloc: Allocator,
@@ -285,6 +288,7 @@ pub const Options = struct {
 ///
 /// If max scrollback is 0, then no scrollback is kept at all.
 pub fn init(
+    io: std.Io,
     alloc: Allocator,
     opts: Options,
 ) Allocator.Error!Screen {
@@ -303,6 +307,7 @@ pub fn init(
     const page_rac = page_pin.rowAndCell();
 
     var result: Screen = .{
+        .io = io,
         .alloc = alloc,
         .pages = pages,
         .no_scrollback = opts.max_scrollback == 0,
@@ -441,6 +446,7 @@ pub fn reset(self: *Screen) void {
 ///
 pub fn clone(
     self: *const Screen,
+    io: std.Io,
     alloc: Allocator,
     top: point.Point,
     bot: ?point.Point,
@@ -565,6 +571,7 @@ pub fn clone(
     } else null;
 
     const result: Screen = .{
+        .io = io,
         .alloc = alloc,
         .pages = pages,
         .no_scrollback = self.no_scrollback,
@@ -575,6 +582,7 @@ pub fn clone(
     result.assertIntegrity();
     return result;
 }
+
 pub fn increaseCapacity(
     self: *Screen,
     node: *PageList.List.Node,
@@ -2894,7 +2902,7 @@ pub fn selectLine(self: *const Screen, opts: SelectLine) ?Selection {
             const this_whitespace = std.mem.indexOfScalar(
                 u21,
                 whitespace,
-                cell.content.codepoint,
+                cell.content.codepoint.data,
             ) != null;
             if (this_whitespace) continue;
 
@@ -2916,7 +2924,7 @@ pub fn selectLine(self: *const Screen, opts: SelectLine) ?Selection {
             const this_whitespace = std.mem.indexOfScalar(
                 u21,
                 whitespace,
-                cell.content.codepoint,
+                cell.content.codepoint.data,
             ) != null;
             if (this_whitespace) continue;
 
@@ -2948,7 +2956,7 @@ pub fn selectAll(self: *Screen) ?Selection {
             const this_whitespace = std.mem.indexOfAny(
                 u32,
                 whitespace,
-                &[_]u32{cell.content.codepoint},
+                &[_]u32{cell.content.codepoint.data},
             ) != null;
             if (this_whitespace) continue;
 
@@ -2972,7 +2980,7 @@ pub fn selectAll(self: *Screen) ?Selection {
             const this_whitespace = std.mem.indexOfAny(
                 u32,
                 whitespace,
-                &[_]u32{cell.content.codepoint},
+                &[_]u32{cell.content.codepoint.data},
             ) != null;
             if (this_whitespace) continue;
 
@@ -3040,7 +3048,7 @@ pub fn selectWord(
     const expect_boundary = std.mem.indexOfScalar(
         u21,
         boundary_codepoints,
-        start_cell.content.codepoint,
+        start_cell.content.codepoint.data,
     ) != null;
 
     // Go forwards to find our end boundary
@@ -3058,7 +3066,7 @@ pub fn selectWord(
             const this_boundary = std.mem.indexOfScalar(
                 u21,
                 boundary_codepoints,
-                cell.content.codepoint,
+                cell.content.codepoint.data,
             ) != null;
             if (this_boundary != expect_boundary) break :end prev;
 
@@ -3095,7 +3103,7 @@ pub fn selectWord(
             const this_boundary = std.mem.indexOfScalar(
                 u21,
                 boundary_codepoints,
-                cell.content.codepoint,
+                cell.content.codepoint.data,
             ) != null;
             if (this_boundary != expect_boundary) break :start prev;
 
@@ -3517,7 +3525,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
             1 => {
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = c },
+                    .content = .{ .codepoint = @bitCast(@as(u24, @intCast(c))) },
                     .style_id = self.cursor.style_id,
                     .protected = self.cursor.protected,
                     .semantic_content = self.cursor.semantic_content,
@@ -3539,7 +3547,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 if (self.cursor.x == self.pages.cols - 1) {
                     self.cursor.page_cell.* = .{
                         .content_tag = .codepoint,
-                        .content = .{ .codepoint = 0 },
+                        .content = .{ .codepoint = .{ .data = 0 } },
                         .wide = .spacer_head,
                         .protected = self.cursor.protected,
                         .semantic_content = self.cursor.semantic_content,
@@ -3557,7 +3565,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 // Write our wide char
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = c },
+                    .content = .{ .codepoint = .{ .data = c } },
                     .style_id = self.cursor.style_id,
                     .wide = .wide,
                     .protected = self.cursor.protected,
@@ -3571,7 +3579,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 self.cursorRight(1);
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = 0 },
+                    .content = .{ .codepoint = .{ .data = 0 } },
                     .wide = .spacer_tail,
                     .protected = self.cursor.protected,
                     .semantic_content = self.cursor.semantic_content,
@@ -3603,8 +3611,9 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
 test "Screen read and write" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
     try testing.expectEqual(@as(style.Id, 0), s.cursor.style_id);
 
@@ -3617,8 +3626,9 @@ test "Screen read and write" {
 test "Screen read and write newline" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
     try testing.expectEqual(@as(style.Id, 0), s.cursor.style_id);
 
@@ -3631,8 +3641,9 @@ test "Screen read and write newline" {
 test "Screen read and write scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 2, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 2, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.testWriteString("hello\nworld\ntest");
@@ -3651,8 +3662,9 @@ test "Screen read and write scrollback" {
 test "Screen read and write no scrollback small" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 2, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 2, .max_scrollback = 0 });
     defer s.deinit();
 
     try s.testWriteString("hello\nworld\ntest");
@@ -3671,8 +3683,9 @@ test "Screen read and write no scrollback small" {
 test "Screen read and write no scrollback large" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 2, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 2, .max_scrollback = 0 });
     defer s.deinit();
 
     for (0..1_000) |i| {
@@ -3692,14 +3705,15 @@ test "Screen read and write no scrollback large" {
 test "Screen cursorCopy x/y" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     s.cursorAbsolute(2, 3);
     try testing.expect(s.cursor.x == 2);
     try testing.expect(s.cursor.y == 3);
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s2.deinit();
     try s2.cursorCopy(s.cursor, .{});
     try testing.expect(s2.cursor.x == 2);
@@ -3716,11 +3730,12 @@ test "Screen cursorCopy x/y" {
 test "Screen cursorCopy style deref" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s2.deinit();
     const page = s2.cursor.page_pin.node.page();
 
@@ -3738,11 +3753,12 @@ test "Screen cursorCopy style deref" {
 test "Screen cursorCopy style deref new page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 2048 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 2048 });
     defer s2.deinit();
 
     // We need to get the cursor on a new page.
@@ -3811,12 +3827,13 @@ test "Screen cursorCopy style deref new page" {
 test "Screen cursorCopy style copy" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.setAttribute(.{ .bold = {} });
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s2.deinit();
     const page = s2.cursor.page_pin.node.page();
     try s2.cursorCopy(s.cursor, .{});
@@ -3827,11 +3844,12 @@ test "Screen cursorCopy style copy" {
 test "Screen cursorCopy hyperlink deref" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s2.deinit();
     const page = s2.cursor.page_pin.node.page();
 
@@ -3849,8 +3867,9 @@ test "Screen cursorCopy hyperlink deref" {
 test "Screen write regrows compacted page capacity" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{
+    var s = try Screen.init(io, alloc, .{
         .cols = 80,
         .rows = 24,
         .max_scrollback = 0,
@@ -3897,11 +3916,12 @@ test "Screen write regrows compacted page capacity" {
 test "Screen cursorCopy hyperlink deref new page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 2048 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 2048 });
     defer s2.deinit();
 
     // We need to get the cursor on a new page.
@@ -3970,8 +3990,9 @@ test "Screen cursorCopy hyperlink deref new page" {
 test "Screen cursorCopy hyperlink copy" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
     // Create a hyperlink for the cursor.
@@ -3979,7 +4000,7 @@ test "Screen cursorCopy hyperlink copy" {
     try testing.expectEqual(@as(usize, 1), s.cursor.page_pin.node.page().hyperlink_set.count());
     try testing.expect(s.cursor.hyperlink_id != 0);
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s2.deinit();
     const page = s2.cursor.page_pin.node.page();
 
@@ -3995,8 +4016,9 @@ test "Screen cursorCopy hyperlink copy" {
 test "Screen cursorCopy hyperlink copy disabled" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
     // Create a hyperlink for the cursor.
@@ -4004,7 +4026,7 @@ test "Screen cursorCopy hyperlink copy disabled" {
     try testing.expectEqual(@as(usize, 1), s.cursor.page_pin.node.page().hyperlink_set.count());
     try testing.expect(s.cursor.hyperlink_id != 0);
 
-    var s2 = try Screen.init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s2 = try Screen.init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s2.deinit();
     const page = s2.cursor.page_pin.node.page();
 
@@ -4020,8 +4042,9 @@ test "Screen cursorCopy hyperlink copy disabled" {
 test "Screen style basics" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
     const page = s.cursor.page_pin.node.page();
     try testing.expectEqual(@as(usize, 0), page.styles.count());
@@ -4042,8 +4065,9 @@ test "Screen style basics" {
 test "Screen style reset to default" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
     const page = s.cursor.page_pin.node.page();
     try testing.expectEqual(@as(usize, 0), page.styles.count());
@@ -4062,8 +4086,9 @@ test "Screen style reset to default" {
 test "Screen style reset with unset" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
     const page = s.cursor.page_pin.node.page();
     try testing.expectEqual(@as(usize, 0), page.styles.count());
@@ -4082,8 +4107,9 @@ test "Screen style reset with unset" {
 test "Screen clearRows active one line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.testWriteString("hello, world");
@@ -4097,8 +4123,9 @@ test "Screen clearRows active one line" {
 test "Screen clearRows active multi line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.testWriteString("hello\nworld");
@@ -4113,8 +4140,9 @@ test "Screen clearRows active multi line" {
 test "Screen clearRows active styled line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.setAttribute(.{ .bold = {} });
@@ -4170,8 +4198,9 @@ test "Screen clearRows uses stored page width" {
 test "Screen clearRows protected" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.testWriteString("UNPROTECTED");
@@ -4198,8 +4227,9 @@ test "Screen clearRows protected" {
 test "Screen eraseRows history" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.testWriteString("1\n2\n3\n4\n5\n6");
@@ -4232,8 +4262,9 @@ test "Screen eraseRows history" {
 test "Screen eraseRows history with more lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 1000 });
+    var s = try Screen.init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 1000 });
     defer s.deinit();
 
     try s.testWriteString("A\nB\nC\n1\n2\n3\n4\n5\n6");
@@ -4266,8 +4297,9 @@ test "Screen eraseRows history with more lines" {
 test "Screen eraseRows active partial" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try Screen.init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try Screen.init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     try s.testWriteString("1\n2\n3");
@@ -4316,8 +4348,9 @@ test "Screen: cursorCellEndOfPrev across mixed-width pages" {
 test "Screen: cursorDown across pages preserves style" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
 
     // Scroll down enough to go to another page
@@ -4368,8 +4401,9 @@ test "Screen: cursorDown across pages preserves style" {
 test "Screen: cursorUp across pages preserves style" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
 
     // Scroll down enough to go to another page
@@ -4415,8 +4449,9 @@ test "Screen: cursorUp across pages preserves style" {
 test "Screen: cursorAbsolute across pages preserves style" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
 
     // Scroll down enough to go to another page
@@ -4470,8 +4505,9 @@ test "Screen: cursorAbsolute to page with insufficient capacity" {
 
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
 
     // Scroll down enough to go to another page
@@ -4537,8 +4573,9 @@ test "Screen: cursorAbsolute to page with insufficient capacity" {
 test "Screen: scrolling" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     try s.setAttribute(.{ .direct_color_bg = .{ .r = 155 } });
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
@@ -4579,8 +4616,9 @@ test "Screen: scrolling" {
 test "Screen: scrolling with a single-row screen no scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 1, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 1, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABCD");
 
@@ -4599,8 +4637,9 @@ test "Screen: scrolling with a single-row screen no scrollback" {
 test "Screen: scrolling with a single-row screen with scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 1, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 1, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD");
 
@@ -4629,8 +4668,9 @@ test "Screen: scrolling with a single-row screen with scrollback" {
 test "Screen: scrolling across pages preserves style" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.setAttribute(.{ .bold = {} });
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
@@ -4658,8 +4698,9 @@ test "Screen: scrolling across pages preserves style" {
 test "Screen: scroll down from 0" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -4677,8 +4718,9 @@ test "Screen: scroll down from 0" {
 test "Screen: scrollback various cases" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
     try s.cursorDownScroll();
@@ -4758,8 +4800,9 @@ test "Screen: scrollback various cases" {
 test "Screen: scrollback with multi-row delta" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH\n6IJKL");
 
@@ -4784,8 +4827,9 @@ test "Screen: scrollback with multi-row delta" {
 test "Screen: scrollback empty" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 50 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 50 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
     s.scroll(.{ .delta_row = 1 });
@@ -4799,8 +4843,9 @@ test "Screen: scrollback empty" {
 test "Screen: scrollback doesn't move viewport if not at bottom" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH");
 
@@ -4834,8 +4879,9 @@ test "Screen: scrollback doesn't move viewport if not at bottom" {
 test "Screen: scrolling moves selection" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -4914,7 +4960,7 @@ test "Screen: cursorScrollRegionUp simple" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(testing.io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4MNOP\n5QRST");
 
@@ -4957,7 +5003,7 @@ test "Screen: cursorScrollRegionUp moves selection" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(testing.io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4MNOP\n5QRST");
 
@@ -4995,7 +5041,7 @@ test "Screen: cursorScrollRegionUp region spans pages" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
+    var s = try init(testing.io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
     defer s.deinit();
 
     // We need to get the cursor to a new page
@@ -5059,7 +5105,7 @@ test "Screen: cursorScrollRegionUp region spans pages with background SGR" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
+    var s = try init(testing.io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
     defer s.deinit();
 
     // We need to get the cursor to a new page. See the previous test
@@ -5102,7 +5148,7 @@ test "Screen: cursorScrollRegionUp with styled erased row" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(testing.io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
 
     // Write a styled row at the top so the erased row has managed
@@ -5130,8 +5176,9 @@ test "Screen: cursorScrollRegionUp with styled erased row" {
 test "Screen: scrolling moves viewport" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n");
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
@@ -5155,8 +5202,9 @@ test "Screen: scrolling moves viewport" {
 test "Screen: scrolling when viewport is pruned" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 215, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 215, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
 
     // Write some to create scrollback and move back into our scrollback.
@@ -5181,8 +5229,9 @@ test "Screen: scrolling when viewport is pruned" {
 test "Screen: scroll and clear full screen" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -5208,8 +5257,9 @@ test "Screen: scroll and clear full screen" {
 test "Screen: scroll and clear partial screen" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH");
 
@@ -5235,8 +5285,9 @@ test "Screen: scroll and clear partial screen" {
 test "Screen: scroll and clear empty screen" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     try s.scrollClear();
     {
@@ -5254,8 +5305,9 @@ test "Screen: scroll and clear empty screen" {
 test "Screen: scroll and clear ignore blank lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH");
     try s.scrollClear();
@@ -5297,8 +5349,9 @@ test "Screen: scroll and clear ignore blank lines" {
 test "Screen: scroll above same page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     try s.setAttribute(.{ .direct_color_bg = .{ .r = 155 } });
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
@@ -5359,8 +5412,9 @@ test "Screen: scroll above same page" {
 test "Screen: scroll above same page but cursor on previous page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
     defer s.deinit();
 
     // We need to get the cursor to a new page
@@ -5446,8 +5500,9 @@ test "Screen: scroll above same page but cursor on previous page" {
 test "Screen: scroll above same page but cursor on previous page last row" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
     defer s.deinit();
 
     // We need to get the cursor to a new page
@@ -5536,8 +5591,9 @@ test "Screen: scroll above same page but cursor on previous page last row" {
 test "Screen: scroll above creates new page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
 
     // We need to get the cursor to a new page
@@ -5611,8 +5667,9 @@ test "Screen: scroll above creates new page" {
 test "Screen: scroll above with cursor on non-final row" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 4, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 4, .max_scrollback = 10 });
     defer s.deinit();
 
     // Get the cursor to be 2 rows above a new page
@@ -5688,8 +5745,9 @@ test "Screen: scroll above with cursor on non-final row" {
 test "Screen: scroll above no scrollback bottom of page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
 
     const first_page_size = s.pages.pages.first.?.capacity().rows;
@@ -5753,8 +5811,9 @@ test "Screen: scroll above no scrollback bottom of page" {
 test "Screen: clone" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH");
     {
@@ -5766,7 +5825,7 @@ test "Screen: clone" {
     try testing.expectEqual(@as(usize, 1), s.cursor.y);
 
     // Clone
-    var s2 = try s.clone(alloc, .{ .active = .{} }, null);
+    var s2 = try s.clone(io, alloc, .{ .active = .{} }, null);
     defer s2.deinit();
     {
         const contents = try s2.dumpStringAlloc(alloc, .{ .active = .{} });
@@ -5795,8 +5854,9 @@ test "Screen: clone" {
 test "Screen: clone partial" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH");
     {
@@ -5808,7 +5868,7 @@ test "Screen: clone partial" {
     try testing.expectEqual(@as(usize, 1), s.cursor.y);
 
     // Clone
-    var s2 = try s.clone(alloc, .{ .active = .{ .y = 1 } }, null);
+    var s2 = try s.clone(io, alloc, .{ .active = .{ .y = 1 } }, null);
     defer s2.deinit();
     {
         const contents = try s2.dumpStringAlloc(alloc, .{ .active = .{} });
@@ -5824,8 +5884,9 @@ test "Screen: clone partial" {
 test "Screen: clone partial cursor out of bounds" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH");
     {
@@ -5838,6 +5899,7 @@ test "Screen: clone partial cursor out of bounds" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 0 } },
         .{ .active = .{ .y = 0 } },
@@ -5857,8 +5919,9 @@ test "Screen: clone partial cursor out of bounds" {
 test "Screen: clone contains full selection" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -5871,6 +5934,7 @@ test "Screen: clone contains full selection" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{} },
         null,
@@ -5894,8 +5958,9 @@ test "Screen: clone contains full selection" {
 test "Screen: clone contains none of selection" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -5908,6 +5973,7 @@ test "Screen: clone contains none of selection" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 1 } },
         null,
@@ -5921,8 +5987,9 @@ test "Screen: clone contains none of selection" {
 test "Screen: clone contains selection start cutoff" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -5935,6 +6002,7 @@ test "Screen: clone contains selection start cutoff" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 1 } },
         null,
@@ -5958,8 +6026,9 @@ test "Screen: clone contains selection start cutoff" {
 test "Screen: clone contains selection end cutoff" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -5972,6 +6041,7 @@ test "Screen: clone contains selection end cutoff" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 0 } },
         .{ .active = .{ .y = 1 } },
@@ -5995,8 +6065,9 @@ test "Screen: clone contains selection end cutoff" {
 test "Screen: clone contains selection end cutoff reversed" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
@@ -6009,6 +6080,7 @@ test "Screen: clone contains selection end cutoff reversed" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 0 } },
         .{ .active = .{ .y = 1 } },
@@ -6032,8 +6104,9 @@ test "Screen: clone contains selection end cutoff reversed" {
 test "Screen: clone contains subset of selection" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 4, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 4, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4ABCD");
 
@@ -6046,6 +6119,7 @@ test "Screen: clone contains subset of selection" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 1 } },
         .{ .active = .{ .y = 2 } },
@@ -6114,8 +6188,9 @@ test "Screen: clone clamps clipped selections to mixed-width pages" {
 test "Screen: clone contains subset of rectangle selection" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 4, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 4, .max_scrollback = 1 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4ABCD");
 
@@ -6128,6 +6203,7 @@ test "Screen: clone contains subset of rectangle selection" {
 
     // Clone
     var s2 = try s.clone(
+        io,
         alloc,
         .{ .active = .{ .y = 1 } },
         .{ .active = .{ .y = 2 } },
@@ -6153,13 +6229,15 @@ test "Screen: clone contains subset of rectangle selection" {
 test "Screen: clone basic" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL");
 
     {
         var s2 = try s.clone(
+            io,
             alloc,
             .{ .active = .{ .y = 1 } },
             .{ .active = .{ .y = 1 } },
@@ -6174,6 +6252,7 @@ test "Screen: clone basic" {
 
     {
         var s2 = try s.clone(
+            io,
             alloc,
             .{ .active = .{ .y = 1 } },
             .{ .active = .{ .y = 2 } },
@@ -6190,12 +6269,14 @@ test "Screen: clone basic" {
 test "Screen: clone empty viewport" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
 
     {
         var s2 = try s.clone(
+            io,
             alloc,
             .{ .viewport = .{ .y = 0 } },
             .{ .viewport = .{ .y = 0 } },
@@ -6212,13 +6293,15 @@ test "Screen: clone empty viewport" {
 test "Screen: clone one line viewport" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABC");
 
     {
         var s2 = try s.clone(
+            io,
             alloc,
             .{ .viewport = .{ .y = 0 } },
             .{ .viewport = .{ .y = 0 } },
@@ -6235,12 +6318,14 @@ test "Screen: clone one line viewport" {
 test "Screen: clone empty active" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
 
     {
         var s2 = try s.clone(
+            io,
             alloc,
             .{ .active = .{ .y = 0 } },
             .{ .active = .{ .y = 0 } },
@@ -6257,13 +6342,15 @@ test "Screen: clone empty active" {
 test "Screen: clone one line active with extra space" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABC");
 
     {
         var s2 = try s.clone(
+            io,
             alloc,
             .{ .active = .{ .y = 0 } },
             null,
@@ -6280,8 +6367,9 @@ test "Screen: clone one line active with extra space" {
 test "Screen: clear history with no history" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     try s.testWriteString("4ABCD\n5EFGH\n6IJKL");
     try testing.expect(s.pages.viewport == .active);
@@ -6304,8 +6392,9 @@ test "Screen: clear history with no history" {
 test "Screen: clear history" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH\n6IJKL");
     try testing.expect(s.pages.viewport == .active);
@@ -6338,8 +6427,9 @@ test "Screen: clear history" {
 test "Screen: clear above cursor" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 3 });
     defer s.deinit();
     try s.testWriteString("4ABCD\n5EFGH\n6IJKL");
     s.clearRows(
@@ -6365,8 +6455,9 @@ test "Screen: clear above cursor" {
 test "Screen: clear above cursor with history" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     try s.testWriteString("1ABCD\n2EFGH\n3IJKL\n");
     try s.testWriteString("4ABCD\n5EFGH\n6IJKL");
@@ -6393,8 +6484,9 @@ test "Screen: clear above cursor with history" {
 test "Screen: resize (no reflow) more rows" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6411,8 +6503,9 @@ test "Screen: resize (no reflow) more rows" {
 test "Screen: resize (no reflow) less rows" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6434,8 +6527,9 @@ test "Screen: resize (no reflow) less rows" {
 test "Screen: resize (no reflow) less rows trims blank lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD";
     try s.testWriteString(str);
@@ -6469,8 +6563,9 @@ test "Screen: resize (no reflow) less rows trims blank lines" {
 test "Screen: resize (no reflow) more rows trims blank lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD";
     try s.testWriteString(str);
@@ -6504,8 +6599,9 @@ test "Screen: resize (no reflow) more rows trims blank lines" {
 test "Screen: resize (no reflow) more cols" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6521,8 +6617,9 @@ test "Screen: resize (no reflow) more cols" {
 test "Screen: resize (no reflow) less cols" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6539,8 +6636,9 @@ test "Screen: resize (no reflow) less cols" {
 test "Screen: resize (no reflow) more rows with scrollback cursor end" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 7, .rows = 3, .max_scrollback = 2 });
+    var s = try init(io, alloc, .{ .cols = 7, .rows = 3, .max_scrollback = 2 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -6556,8 +6654,9 @@ test "Screen: resize (no reflow) more rows with scrollback cursor end" {
 test "Screen: resize (no reflow) less rows with scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 7, .rows = 3, .max_scrollback = 2 });
+    var s = try init(io, alloc, .{ .cols = 7, .rows = 3, .max_scrollback = 2 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -6575,8 +6674,9 @@ test "Screen: resize (no reflow) less rows with scrollback" {
 test "Screen: resize (no reflow) less rows with empty trailing" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1\n2\n3\n4\n5\n6\n7\n8";
     try s.testWriteString(str);
@@ -6599,8 +6699,9 @@ test "Screen: resize (no reflow) less rows with empty trailing" {
 test "Screen: resize (no reflow) more rows with soft wrapping" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     const str = "1A2B\n3C4E\n5F6G";
     try s.testWriteString(str);
@@ -6640,8 +6741,9 @@ test "Screen: resize (no reflow) more rows with soft wrapping" {
 test "Screen: resize more rows no scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6667,8 +6769,9 @@ test "Screen: resize more rows no scrollback" {
 test "Screen: resize more rows with empty scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6694,8 +6797,9 @@ test "Screen: resize more rows with empty scrollback" {
 test "Screen: resize more rows with populated scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -6713,7 +6817,7 @@ test "Screen: resize more rows with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '4'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '4'), list_cell.cell.content.codepoint.data);
     }
 
     // Resize
@@ -6725,7 +6829,7 @@ test "Screen: resize more rows with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '4'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '4'), list_cell.cell.content.codepoint.data);
     }
 
     {
@@ -6739,8 +6843,9 @@ test "Screen: resize more rows with populated scrollback" {
 test "Screen: resize more cols no reflow" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6768,8 +6873,9 @@ test "Screen: resize more cols no reflow" {
 test "Screen: resize more cols perfect split" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH3IJKL";
     try s.testWriteString(str);
@@ -6786,8 +6892,9 @@ test "Screen: resize more cols perfect split" {
 test "Screen: resize (no reflow) more cols with scrollback scrolled up" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1\n2\n3\n4\n5\n6\n7\n8";
     try s.testWriteString(str);
@@ -6819,8 +6926,9 @@ test "Screen: resize (no reflow) more cols with scrollback scrolled up" {
 test "Screen: resize (no reflow) less cols with scrollback scrolled up" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1\n2\n3\n4\n5\n6\n7\n8";
     try s.testWriteString(str);
@@ -6863,8 +6971,9 @@ test "Screen: resize (no reflow) less cols with scrollback scrolled up" {
 test "Screen: resize more cols no reflow preserves semantic prompt" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
 
     // Set one of the rows to be a prompt
@@ -6907,8 +7016,9 @@ test "Screen: resize more cols no reflow preserves semantic prompt" {
 test "Screen: resize more cols with reflow that fits full width" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6928,7 +7038,7 @@ test "Screen: resize more cols with reflow that fits full width" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '2'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '2'), list_cell.cell.content.codepoint.data);
     }
 
     // Resize and verify we undid the soft wrap because we have space now
@@ -6947,8 +7057,9 @@ test "Screen: resize more cols with reflow that fits full width" {
 test "Screen: resize more cols with reflow that ends in newline" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 6, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 6, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -6968,7 +7079,7 @@ test "Screen: resize more cols with reflow that ends in newline" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint.data);
     }
 
     // Resize and verify we undid the soft wrap because we have space now
@@ -6985,15 +7096,16 @@ test "Screen: resize more cols with reflow that ends in newline" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint.data);
     }
 }
 
 test "Screen: resize more cols with reflow that forces more wrapping" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -7005,7 +7117,7 @@ test "Screen: resize more cols with reflow that forces more wrapping" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '2'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '2'), list_cell.cell.content.codepoint.data);
     }
 
     // Verify we soft wrapped
@@ -7033,8 +7145,9 @@ test "Screen: resize more cols with reflow that forces more wrapping" {
 test "Screen: resize more cols with reflow that unwraps multiple times" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH3IJKL";
     try s.testWriteString(str);
@@ -7046,7 +7159,7 @@ test "Screen: resize more cols with reflow that unwraps multiple times" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint.data);
     }
 
     // Verify we soft wrapped
@@ -7074,8 +7187,9 @@ test "Screen: resize more cols with reflow that unwraps multiple times" {
 test "Screen: resize more cols with populated scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL\n4ABCD5EFGH";
     try s.testWriteString(str);
@@ -7093,7 +7207,7 @@ test "Screen: resize more cols with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '5'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '5'), list_cell.cell.content.codepoint.data);
     }
 
     // Resize
@@ -7111,7 +7225,7 @@ test "Screen: resize more cols with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '5'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '5'), list_cell.cell.content.codepoint.data);
     }
 }
 
@@ -7123,8 +7237,9 @@ test "Screen: resize more cols bounded scrollback keeps viewport valid" {
     // resize path. A direct PageList resize repro does not hit the same bug.
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{
+    var s = try init(io, alloc, .{
         .cols = 2,
         .rows = 10,
         .max_scrollback = 10_000,
@@ -7158,7 +7273,7 @@ test "Screen: resize more cols bounded scrollback keeps viewport valid" {
             for (0..s.pages.cols) |x| {
                 page.getRowAndCell(x, y).cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = 'A' },
+                    .content = .{ .codepoint = @bitCast(@as(u24, 'A')) },
                 };
             }
         }
@@ -7198,8 +7313,9 @@ test "Screen: resize more cols bounded scrollback keeps viewport valid" {
 test "Screen: resize more cols with reflow" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1ABC\n2DEF\n3ABC\n4DEF";
     try s.testWriteString(str);
@@ -7211,7 +7327,7 @@ test "Screen: resize more cols with reflow" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.content.codepoint.data);
     }
 
     // Verify we soft wrapped
@@ -7239,8 +7355,9 @@ test "Screen: resize more cols with reflow" {
 test "Screen: resize more rows and cols with wrapping" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 4, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 4, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1A2B\n3C4D";
     try s.testWriteString(str);
@@ -7272,8 +7389,9 @@ test "Screen: resize more rows and cols with wrapping" {
 test "Screen: resize less rows no scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -7303,8 +7421,9 @@ test "Screen: resize less rows no scrollback" {
 test "Screen: resize less rows moving cursor" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -7316,7 +7435,7 @@ test "Screen: resize less rows moving cursor" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'I'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'I'), list_cell.cell.content.codepoint.data);
     }
 
     // Resize
@@ -7343,8 +7462,9 @@ test "Screen: resize less rows moving cursor" {
 test "Screen: resize less rows with empty scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -7366,8 +7486,9 @@ test "Screen: resize less rows with empty scrollback" {
 test "Screen: resize less rows with populated scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -7397,8 +7518,9 @@ test "Screen: resize less rows with populated scrollback" {
 test "Screen: resize less rows with full scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     const str = "00000\n1ABCD\n2EFGH\n3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -7437,8 +7559,9 @@ test "Screen: resize less rows with full scrollback" {
 test "Screen: resize less cols no reflow" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1AB\n2EF\n3IJ";
     try s.testWriteString(str);
@@ -7466,8 +7589,9 @@ test "Screen: resize less cols no reflow" {
 test "Screen: resize less cols with reflow but row space" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     const str = "1ABCD";
     try s.testWriteString(str);
@@ -7479,7 +7603,7 @@ test "Screen: resize less cols with reflow but row space" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'D'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'D'), list_cell.cell.content.codepoint.data);
     }
 
     try s.resize(.{ .cols = 3, .rows = 3 });
@@ -7504,8 +7628,9 @@ test "Screen: resize less cols with reflow but row space" {
 test "Screen: resize less cols with reflow with trimmed rows" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -7528,8 +7653,9 @@ test "Screen: resize less cols with reflow with trimmed rows" {
 test "Screen: resize less cols with reflow with trimmed rows and scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
     const str = "3IJKL\n4ABCD\n5EFGH";
     try s.testWriteString(str);
@@ -7552,8 +7678,9 @@ test "Screen: resize less cols with reflow with trimmed rows and scrollback" {
 test "Screen: resize less cols with reflow previously wrapped" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "3IJKL4ABCD5EFGH";
     try s.testWriteString(str);
@@ -7585,8 +7712,9 @@ test "Screen: resize less cols with reflow previously wrapped" {
 test "Screen: resize less cols with reflow and scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1A\n2B\n3C\n4D\n5E";
     try s.testWriteString(str);
@@ -7598,7 +7726,7 @@ test "Screen: resize less cols with reflow and scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.content.codepoint.data);
     }
 
     try s.resize(.{ .cols = 3, .rows = 3 });
@@ -7618,8 +7746,9 @@ test "Screen: resize less cols with reflow and scrollback" {
 test "Screen: resize less cols with reflow previously wrapped and scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 2 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 2 });
     defer s.deinit();
     const str = "1ABCD2EFGH3IJKL4ABCD5EFGH";
     try s.testWriteString(str);
@@ -7639,7 +7768,7 @@ test "Screen: resize less cols with reflow previously wrapped and scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.content.codepoint.data);
     }
 
     try s.resize(.{ .cols = 3, .rows = 3 });
@@ -7665,15 +7794,16 @@ test "Screen: resize less cols with reflow previously wrapped and scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.content.codepoint.data);
     }
 }
 
 test "Screen: resize less cols with scrollback keeps cursor row" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     const str = "1A\n2B\n3C\n4D\n5E";
     try s.testWriteString(str);
@@ -7701,8 +7831,9 @@ test "Screen: resize less cols with scrollback keeps cursor row" {
 test "Screen: resize more rows, less cols with reflow with scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 3 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 3 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH3IJKL\n4MNOP";
     try s.testWriteString(str);
@@ -7742,8 +7873,9 @@ test "Screen: resize more rows, less cols with reflow with scrollback" {
 test "Screen: resize more rows then shrink again" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
     defer s.deinit();
     const str = "1ABC";
     try s.testWriteString(str);
@@ -7791,8 +7923,9 @@ test "Screen: resize more rows then shrink again" {
 test "Screen: resize less cols to eliminate wide char" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 1, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 1, .max_scrollback = 0 });
     defer s.deinit();
     const str = "😀";
     try s.testWriteString(str);
@@ -7805,7 +7938,7 @@ test "Screen: resize less cols to eliminate wide char" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint.data);
     }
 
     // Resize to 1 column can't fit a wide char. So it should be deleted.
@@ -7818,7 +7951,7 @@ test "Screen: resize less cols to eliminate wide char" {
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         const cell = list_cell.cell;
-        try testing.expectEqual(@as(u21, 0), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0), cell.content.codepoint.data);
         try testing.expectEqual(Cell.Wide.narrow, cell.wide);
     }
 }
@@ -7826,8 +7959,9 @@ test "Screen: resize less cols to eliminate wide char" {
 test "Screen: resize less cols to wrap wide char" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 3, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 3, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "x😀";
     try s.testWriteString(str);
@@ -7840,7 +7974,7 @@ test "Screen: resize less cols to wrap wide char" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 1, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint.data);
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 2, .y = 0 } }).?;
@@ -7865,8 +7999,9 @@ test "Screen: resize less cols to wrap wide char" {
 test "Screen: resize less cols to eliminate wide char with row space" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 2, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 2, .max_scrollback = 0 });
     defer s.deinit();
     const str = "😀";
     try s.testWriteString(str);
@@ -7879,7 +8014,7 @@ test "Screen: resize less cols to eliminate wide char with row space" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint.data);
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 1, .y = 0 } }).?;
@@ -7898,7 +8033,8 @@ test "Screen: resize less cols to eliminate wide char with row space" {
 test "Screen: resize less cols reflows cursor after wrapped text" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var s = try Screen.init(alloc, .{ .cols = 50, .rows = 7, .max_scrollback = 0 });
+    const io = testing.io;
+    var s = try Screen.init(io, alloc, .{ .cols = 50, .rows = 7, .max_scrollback = 0 });
     defer s.deinit();
 
     for (0..30) |_| try s.testWriteString("a");
@@ -7915,7 +8051,8 @@ test "Screen: resize less cols reflows cursor after wrapped text" {
 test "Screen: resize less cols reflows cursor after empty cells" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
+    const io = testing.io;
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
 
     try s.testWriteString("abc");
@@ -7933,8 +8070,9 @@ test "Screen: resize less cols reflows cursor after empty cells" {
 test "Screen: resize more cols with wide spacer head" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 3, .rows = 2, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 3, .rows = 2, .max_scrollback = 0 });
     defer s.deinit();
     const str = "  😀";
     try s.testWriteString(str);
@@ -7974,7 +8112,7 @@ test "Screen: resize more cols with wide spacer head" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 2, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint.data);
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 3, .y = 0 } }).?;
@@ -7986,8 +8124,9 @@ test "Screen: resize more cols with wide spacer head" {
 test "Screen: resize more cols with wide spacer head multiple lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 3, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 3, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "xxxyy😀";
     try s.testWriteString(str);
@@ -8025,7 +8164,7 @@ test "Screen: resize more cols with wide spacer head multiple lines" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 5, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint.data);
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 6, .y = 0 } }).?;
@@ -8037,8 +8176,9 @@ test "Screen: resize more cols with wide spacer head multiple lines" {
 test "Screen: resize more cols requiring a wide spacer head" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 2, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 2, .max_scrollback = 0 });
     defer s.deinit();
     const str = "xx😀";
     try s.testWriteString(str);
@@ -8076,7 +8216,7 @@ test "Screen: resize more cols requiring a wide spacer head" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 1 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint.data);
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 1, .y = 1 } }).?;
@@ -8088,8 +8228,9 @@ test "Screen: resize more cols requiring a wide spacer head" {
 test "Screen: resize more cols with cursor at prompt" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
 
     // zig fmt: off
@@ -8128,8 +8269,9 @@ test "Screen: resize more cols with cursor at prompt" {
 test "Screen: resize more cols with cursor not at prompt" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
 
     // zig fmt: off
@@ -8169,8 +8311,9 @@ test "Screen: resize more cols with cursor not at prompt" {
 test "Screen: resize with prompt_redraw last clears only one line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 4, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 4, .max_scrollback = 5 });
     defer s.deinit();
 
     // zig fmt: off
@@ -8208,8 +8351,9 @@ test "Screen: resize with prompt_redraw last clears only one line" {
 test "Screen: resize with prompt_redraw last multiline prompt clears only last line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 5 });
     defer s.deinit();
 
     // Create a 3-line prompt: 1 initial + 2 continuation lines
@@ -8248,8 +8392,9 @@ test "Screen: resize with prompt_redraw last multiline prompt clears only last l
 test "Screen: select untracked" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("ABC  DEF\n 123\n456");
 
@@ -8268,8 +8413,9 @@ test "Screen: select untracked" {
 test "Screen: select replaces existing pins" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("ABC  DEF\n 123\n456");
 
@@ -8311,8 +8457,9 @@ test "Screen: reselecting tracked selection preserves its pins" {
 test "Screen: selectAll" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
     {
@@ -8347,8 +8494,9 @@ test "Screen: selectAll" {
 test "Screen: selectLine" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("ABC  DEF\n 123\n456");
 
@@ -8428,8 +8576,9 @@ test "Screen: selectLine" {
 test "Screen: selectLine across soft-wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString(" 12 34012   \n 123");
 
@@ -8454,8 +8603,9 @@ test "Screen: selectLine across soft-wrap" {
 test "Screen: selectLine across full soft-wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1ABCD2EFGH\n3IJKL");
 
@@ -8479,8 +8629,9 @@ test "Screen: selectLine across full soft-wrap" {
 test "Screen: selectLine across soft-wrap ignores blank lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString(" 12 34012             \n 123");
 
@@ -8539,8 +8690,9 @@ test "Screen: selectLine across soft-wrap ignores blank lines" {
 test "Screen: selectLine disabled whitespace trimming" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString(" 12 34012   \n 123");
 
@@ -8588,8 +8740,9 @@ test "Screen: selectLine disabled whitespace trimming" {
 test "Screen: selectLine with scrollback" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 2, .rows = 3, .max_scrollback = 5 });
+    var s = try init(io, alloc, .{ .cols = 2, .rows = 3, .max_scrollback = 5 });
     defer s.deinit();
     try s.testWriteString("1A\n2B\n3C\n4D\n5E");
 
@@ -8632,8 +8785,9 @@ test "Screen: selectLine with scrollback" {
 test "Screen: selectLine semantic prompt boundary" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("ABCDE\n");
     s.cursorSetSemanticContent(.{ .prompt = .initial });
@@ -8682,8 +8836,9 @@ test "Screen: selectLine semantic prompt boundary" {
 test "Screen: selectLine semantic prompt to input boundary" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Write prompt followed by user input on same row: "$>command"
@@ -8731,8 +8886,9 @@ test "Screen: selectLine semantic prompt to input boundary" {
 test "Screen: selectLine semantic input to output boundary" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Row 0: user input
@@ -8776,8 +8932,9 @@ test "Screen: selectLine semantic input to output boundary" {
 test "Screen: selectLine semantic mid-row boundary" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Single row with output then prompt then input: "out$>cmd"
@@ -8844,8 +9001,9 @@ test "Screen: selectLine semantic mid-row boundary" {
 test "Screen: selectLine semantic boundary soft-wrap with mid-row transition" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Row 0: prompt "$ " + input "cmd" (soft-wraps)
@@ -8913,8 +9071,9 @@ test "Screen: selectLine semantic boundary soft-wrap with mid-row transition" {
 test "Screen: selectLine semantic boundary disabled" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Write prompt followed by input
@@ -8945,8 +9104,9 @@ test "Screen: selectLine semantic boundary disabled" {
 test "Screen: selectLine semantic boundary first cell of row" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Row 0: input that soft-wraps
@@ -9032,8 +9192,9 @@ test "Screen: selectLine semantic boundary across mixed-width pages" {
 test "Screen: selectLine semantic all same content" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // All prompt content that soft-wraps
@@ -9066,15 +9227,19 @@ test "Screen: selectLine semantic all same content" {
 test "Screen: selectWord" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("ABC  DEF\n 123\n456");
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     // Outside of active area
@@ -9187,15 +9352,19 @@ test "Screen: selectWord" {
 test "Screen: selectWord across soft-wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString(" 1234012\n 123");
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     {
@@ -9259,15 +9428,19 @@ test "Screen: selectWord across soft-wrap" {
 test "Screen: selectWord whitespace across soft-wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     try s.testWriteString("1       1\n 123");
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     // Going forward
@@ -9325,11 +9498,15 @@ test "Screen: selectWord whitespace across soft-wrap" {
 test "Screen: selectWord with character boundary" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     const cases = [_][]const u8{
@@ -9353,7 +9530,7 @@ test "Screen: selectWord with character boundary" {
     };
 
     for (cases) |case| {
-        var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
+        var s = try init(io, alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
         defer s.deinit();
         try s.testWriteString(case);
 
@@ -9432,8 +9609,9 @@ test "Screen: selectWord with character boundary" {
 test "Screen: selectOutput" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 15, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 15, .max_scrollback = 0 });
     defer s.deinit();
 
     // Build content with cell-level semantic content:
@@ -9528,8 +9706,9 @@ test "Screen: selectOutput" {
 test "Screen: selectionString basic" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -9553,8 +9732,9 @@ test "Screen: selectionString basic" {
 test "Screen: selectionString start outside of written area" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -9578,8 +9758,9 @@ test "Screen: selectionString start outside of written area" {
 test "Screen: selectionString end outside of written area" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -9603,8 +9784,9 @@ test "Screen: selectionString end outside of written area" {
 test "Screen: selectionString trim space" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1AB  \n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -9640,8 +9822,9 @@ test "Screen: selectionString trim space" {
 test "Screen: selectionString trim empty line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1AB  \n\n2EFGH\n3IJKL";
     try s.testWriteString(str);
@@ -9677,8 +9860,9 @@ test "Screen: selectionString trim empty line" {
 test "Screen: selectionString soft wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH3IJKL";
     try s.testWriteString(str);
@@ -9702,8 +9886,9 @@ test "Screen: selectionString soft wrap" {
 test "Screen: selectionString wide char" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1A⚡";
     try s.testWriteString(str);
@@ -9757,8 +9942,9 @@ test "Screen: selectionString wide char" {
 test "Screen: selectionString wide char with header" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 3, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABC⚡";
     try s.testWriteString(str);
@@ -9783,8 +9969,9 @@ test "Screen: selectionString wide char with header" {
 test "Screen: selectionString empty with soft wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 2, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 2, .max_scrollback = 0 });
     defer s.deinit();
 
     // Let me describe the situation that caused this because this
@@ -9816,8 +10003,9 @@ test "Screen: selectionString empty with soft wrap" {
 test "Screen: selectionString with zero width joiner" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 1, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 1, .max_scrollback = 0 });
     defer s.deinit();
     const str = "👨‍"; // this has a ZWJ
     try s.testWriteString(str);
@@ -9826,7 +10014,7 @@ test "Screen: selectionString with zero width joiner" {
     {
         const pin = s.pages.pin(.{ .screen = .{ .y = 0, .x = 0 } }).?;
         const cell = pin.rowAndCell().cell;
-        try testing.expectEqual(@as(u21, 0x1F468), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0x1F468), cell.content.codepoint.data);
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
         const cps = pin.node.page().lookupGrapheme(cell).?;
         try testing.expectEqual(@as(usize, 1), cps.len);
@@ -9852,8 +10040,9 @@ test "Screen: selectionString with zero width joiner" {
 test "Screen: selectionString, rectangle, basic" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 30, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 30, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     const str =
         \\Lorem ipsum dolor
@@ -9885,8 +10074,9 @@ test "Screen: selectionString, rectangle, basic" {
 test "Screen: selectionString, rectangle, w/EOL" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 30, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 30, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     const str =
         \\Lorem ipsum dolor
@@ -9920,8 +10110,9 @@ test "Screen: selectionString, rectangle, w/EOL" {
 test "Screen: selectionString, rectangle, more complex w/breaks" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 30, .rows = 8, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 30, .rows = 8, .max_scrollback = 0 });
     defer s.deinit();
     const str =
         \\Lorem ipsum dolor
@@ -9959,8 +10150,9 @@ test "Screen: selectionString, rectangle, more complex w/breaks" {
 test "Screen: selectionString multi-page" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 2048 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 2048 });
     defer s.deinit();
 
     const first_page_size = s.pages.pages.first.?.capacity().rows;
@@ -9993,8 +10185,9 @@ test "Screen: selectionString multi-page" {
 test "Screen: lineIterator" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD\n2EFGH";
     try s.testWriteString(str);
@@ -10024,8 +10217,9 @@ test "Screen: lineIterator" {
 test "Screen: lineIterator soft wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     const str = "1ABCD2EFGH\n3ABCD";
     try s.testWriteString(str);
@@ -10056,8 +10250,9 @@ test "Screen: lineIterator soft wrap" {
 test "Screen: hyperlink start/end" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
     try testing.expect(s.cursor.hyperlink_id == 0);
     {
@@ -10135,8 +10330,9 @@ test "Screen: implicit hyperlink ID wraps" {
 test "Screen: hyperlink reuse" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     try testing.expect(s.cursor.hyperlink_id == 0);
@@ -10169,12 +10365,13 @@ test "Screen: hyperlink reuse" {
 test "Screen: hyperlink cursor state on resize" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
     // This test depends on underlying PageList implementation so
     // it may be invalid one day. It's here to document/verify the
     // current behavior.
 
-    var s = try init(alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 5, .rows = 10, .max_scrollback = 0 });
     defer s.deinit();
 
     // Start a hyperlink
@@ -10204,8 +10401,9 @@ test "Screen: hyperlink cursor state on resize" {
 test "Screen: cursorSetHyperlink OOM + URI too large for string alloc" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback = 0 });
     defer s.deinit();
 
     // Start a hyperlink with a URI that just barely fits in the string alloc.
@@ -10238,8 +10436,9 @@ test "Screen: cursorSetHyperlink OOM + URI too large for string alloc" {
 test "Screen: increaseCapacity cursor style ref count preserved" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{
+    var s = try init(io, alloc, .{
         .cols = 5,
         .rows = 5,
         .max_scrollback = 0,
@@ -10293,8 +10492,9 @@ test "Screen: increaseCapacity cursor style ref count preserved" {
 test "Screen: increaseCapacity cursor hyperlink ref count preserved" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{
+    var s = try init(io, alloc, .{
         .cols = 5,
         .rows = 5,
         .max_scrollback = 0,
@@ -10336,8 +10536,9 @@ test "Screen: increaseCapacity cursor hyperlink ref count preserved" {
 test "Screen: increaseCapacity cursor with both style and hyperlink preserved" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{
+    var s = try init(io, alloc, .{
         .cols = 5,
         .rows = 5,
         .max_scrollback = 0,
@@ -10401,8 +10602,9 @@ test "Screen: increaseCapacity non-cursor page returns early" {
     // extra cursor accounting (style/hyperlink re-adding).
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{
+    var s = try init(io, alloc, .{
         .cols = 80,
         .rows = 24,
         .max_scrollback = 10000,
@@ -10486,9 +10688,10 @@ test "Screen: cursorDown to page with insufficient capacity" {
 
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
     // Small screen to make page boundary crossing easy to set up
-    var s = try init(alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback = 1 });
     defer s.deinit();
 
     // Scroll down enough to create a second page
@@ -10555,9 +10758,10 @@ test "Screen setAttribute increases capacity when style map is full" {
     // returns OutOfSpace, manualStyleUpdate will split the page instead.
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
     // Use a small screen with multiple rows
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 10 });
     defer s.deinit();
 
     // Write content to multiple rows
@@ -10604,8 +10808,9 @@ test "Screen setAttribute increases capacity when style map is full" {
 test "Screen setAttribute splits page on OutOfSpace at max styles" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{
+    var s = try init(io, alloc, .{
         .cols = 10,
         .rows = 10,
         .max_scrollback = 0,
@@ -10675,7 +10880,8 @@ test "selectionString map allocation failure cleanup" {
     // the StringMap, we don't leak the already-allocated map.string.
     const testing = std.testing;
     const alloc = testing.allocator;
-    var s = try Screen.init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    const io = testing.io;
+    var s = try Screen.init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     try s.testWriteString("hello");
@@ -10704,8 +10910,9 @@ test "selectionString map allocation failure cleanup" {
 test "Screen: promptClickMove line right basic" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10731,8 +10938,9 @@ test "Screen: promptClickMove line right basic" {
 test "Screen: promptClickMove line right cursor not on input" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10758,8 +10966,9 @@ test "Screen: promptClickMove line right cursor not on input" {
 test "Screen: promptClickMove line right click on same position" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10784,8 +10993,9 @@ test "Screen: promptClickMove line right click on same position" {
 test "Screen: promptClickMove line right skips non-input cells" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10816,8 +11026,9 @@ test "Screen: promptClickMove line right skips non-input cells" {
 test "Screen: promptClickMove line right soft-wrapped line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10854,8 +11065,9 @@ test "Screen: promptClickMove line right soft-wrapped line" {
 test "Screen: promptClickMove disabled when click is none" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Click mode is .none by default (disabled)
@@ -10880,8 +11092,9 @@ test "Screen: promptClickMove disabled when click is none" {
 test "Screen: promptClickMove line right stops at hard wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10912,8 +11125,9 @@ test "Screen: promptClickMove line right stops at hard wrap" {
 test "Screen: promptClickMove line right stops at non-continuation row" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10959,8 +11173,9 @@ test "Screen: promptClickMove line right stops at non-continuation row" {
 test "Screen: promptClickMove line left basic" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -10986,8 +11201,9 @@ test "Screen: promptClickMove line left basic" {
 test "Screen: promptClickMove line left skips non-input cells" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11018,8 +11234,9 @@ test "Screen: promptClickMove line left skips non-input cells" {
 test "Screen: promptClickMove line left soft-wrapped line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 10, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11056,8 +11273,9 @@ test "Screen: promptClickMove line left soft-wrapped line" {
 test "Screen: promptClickMove line left stops at hard wrap" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11088,11 +11306,12 @@ test "Screen: promptClickMove line left stops at hard wrap" {
 test "Screen: promptClickMove click right of input same line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
     // Set up: "> hello" where "> " is prompt and "hello" is input
     // Clicking to the right of the 'o' should move cursor past the input
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11118,8 +11337,9 @@ test "Screen: promptClickMove click right of input same line" {
 test "Screen: promptClickMove click right of input cursor at end" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11144,8 +11364,9 @@ test "Screen: promptClickMove click right of input cursor at end" {
 test "Screen: promptClickMove click right of input on lower line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11173,8 +11394,9 @@ test "Screen: promptClickMove click right of input on lower line" {
 test "Screen: promptClickMove click right of input cursor at end lower line" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode
@@ -11198,8 +11420,9 @@ test "Screen: promptClickMove click right of input cursor at end lower line" {
 test "Screen: promptClickMove click right of input cursor on last char" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
 
-    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
+    var s = try init(io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
     defer s.deinit();
 
     // Enable line click mode

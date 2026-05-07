@@ -9,12 +9,13 @@ const Inspector = @import("../inspector/main.zig").Inspector;
 const terminalpkg = @import("../terminal/main.zig");
 const inputpkg = @import("../input.zig");
 const renderer = @import("../renderer.zig");
+const global = @import("../global.zig");
 
 /// The mutex that must be held while reading any of the data in the
 /// members of this state. Note that the state itself is NOT protected
 /// by the mutex and is NOT thread-safe, only the members values of the
 /// state (i.e. the terminal, devmode, etc. values).
-mutex: *std.Thread.Mutex,
+mutex: *std.Io.Mutex,
 
 /// The terminal data.
 terminal: *terminalpkg.Terminal,
@@ -66,7 +67,7 @@ const handoff_timeout_ns = 1 * std.time.ns_per_ms;
 /// starve for as long as the output lasts.
 pub fn lockDemand(self: *State) void {
     _ = self.demand.fetchAdd(1, .monotonic);
-    self.mutex.lock();
+    self.mutex.lockUncancelable(global.io());
     const prev = self.demand.fetchSub(1, .monotonic);
     assert(prev > 0);
 }
@@ -74,9 +75,10 @@ pub fn lockDemand(self: *State) void {
 /// Release `mutex` acquired via `lockDemand` and notify hot loops
 /// parked in `yieldToDemand` that the demanding waiter had its turn.
 pub fn unlockDemand(self: *State) void {
-    self.mutex.unlock();
+    const io = global.io();
+    self.mutex.unlock(io);
     _ = self.handoff_gen.fetchAdd(1, .monotonic);
-    std.Thread.Futex.wake(&self.handoff_gen, 1);
+    io.futexWake(u32, &self.handoff_gen.raw, 1);
 }
 
 /// Called by hot lock/unlock loops between critical sections, with
@@ -96,10 +98,15 @@ pub fn yieldToDemand(self: *State) void {
     // generation no longer matches and timedWait returns immediately.
     const gen = self.handoff_gen.load(.monotonic);
     if (self.demand.load(.monotonic) == 0) return;
-    std.Thread.Futex.timedWait(
-        &self.handoff_gen,
+    const io = global.io();
+    io.futexWaitTimeout(
+        u32,
+        &self.handoff_gen.raw,
         gen,
-        handoff_timeout_ns,
+        .{ .duration = .{
+            .clock = .awake,
+            .raw = .fromNanoseconds(handoff_timeout_ns),
+        } },
     ) catch {};
 }
 

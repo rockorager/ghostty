@@ -835,6 +835,7 @@ pub const Handler = struct {
     }
 
     fn apcEnd(self: *Handler) void {
+        const io = self.terminal.io();
         const alloc = self.terminal.gpa();
         var cmd = self.apc_handler.end() orelse return;
         defer cmd.deinit(alloc);
@@ -842,6 +843,7 @@ pub const Handler = struct {
         switch (cmd) {
             .kitty => |*kitty_cmd| if (comptime build_options.kitty_graphics) {
                 if (self.terminal.kittyGraphics(
+                    io,
                     alloc,
                     kitty_cmd,
                 )) |resp| resp: {
@@ -882,7 +884,7 @@ pub const Handler = struct {
 };
 
 test "basic print" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -898,7 +900,7 @@ test "basic print" {
 }
 
 test "cursor movement" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -916,7 +918,7 @@ test "cursor movement" {
 }
 
 test "erase operations" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 20, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 20, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -937,7 +939,7 @@ test "erase operations" {
 }
 
 test "tabs" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -952,7 +954,7 @@ test "tabs" {
 }
 
 test "modes" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -967,7 +969,7 @@ test "modes" {
 }
 
 test "scrolling regions" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -982,7 +984,7 @@ test "scrolling regions" {
 }
 
 test "charsets" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -998,7 +1000,7 @@ test "charsets" {
 }
 
 test "alt screen" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 5 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1025,7 +1027,7 @@ test "alt screen" {
 }
 
 test "cursor save and restore" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1051,7 +1053,7 @@ test "cursor save and restore" {
 }
 
 test "attributes" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1067,7 +1069,7 @@ test "attributes" {
 }
 
 test "DECALN screen alignment" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 3 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 3 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1087,7 +1089,7 @@ test "DECALN screen alignment" {
 }
 
 test "full reset" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1114,7 +1116,7 @@ test "full reset" {
 }
 
 test "glyph protocol APC with write_pty callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1142,7 +1144,7 @@ test "glyph protocol APC with write_pty callback" {
 }
 
 test "ignores query actions" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1163,7 +1165,7 @@ test "ignores query actions" {
 }
 
 test "OSC 4 set and reset palette" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1186,7 +1188,7 @@ test "OSC 4 set and reset palette" {
 }
 
 test "OSC 104 reset all palette colors" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1211,7 +1213,7 @@ test "OSC 104 reset all palette colors" {
 }
 
 test "OSC 10 set and reset foreground color" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1233,7 +1235,7 @@ test "OSC 10 set and reset foreground color" {
 }
 
 test "OSC 11 set and reset background color" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1252,7 +1254,7 @@ test "OSC 11 set and reset background color" {
 }
 
 test "OSC 12 set and reset cursor color" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1271,7 +1273,7 @@ test "OSC 12 set and reset cursor color" {
 }
 
 test "OSC color query responses" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1328,7 +1330,7 @@ test "OSC color query responses" {
 }
 
 test "kitty color protocol set palette" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1344,7 +1346,7 @@ test "kitty color protocol set palette" {
 }
 
 test "kitty color protocol reset palette" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1361,7 +1363,7 @@ test "kitty color protocol reset palette" {
 }
 
 test "kitty color protocol set foreground" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1376,7 +1378,7 @@ test "kitty color protocol set foreground" {
 }
 
 test "kitty color protocol set background" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1391,7 +1393,7 @@ test "kitty color protocol set background" {
 }
 
 test "kitty color protocol set cursor" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1406,7 +1408,7 @@ test "kitty color protocol set cursor" {
 }
 
 test "kitty color protocol reset foreground" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1422,7 +1424,7 @@ test "kitty color protocol reset foreground" {
 }
 
 test "kitty color protocol query responses" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1462,7 +1464,7 @@ test "kitty color protocol query responses" {
 }
 
 test "palette dirty flag set on color change" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1487,7 +1489,7 @@ test "palette dirty flag set on color change" {
 }
 
 test "semantic prompt fresh line" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1500,7 +1502,7 @@ test "semantic prompt fresh line" {
 }
 
 test "semantic prompt fresh line new prompt" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1524,7 +1526,7 @@ test "semantic prompt fresh line new prompt" {
 }
 
 test "semantic prompt end of input, then start output" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1541,7 +1543,7 @@ test "semantic prompt end of input, then start output" {
 }
 
 test "semantic prompt prompt_start" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1558,7 +1560,7 @@ test "semantic prompt prompt_start" {
 }
 
 test "semantic prompt new_command" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1576,7 +1578,7 @@ test "semantic prompt new_command" {
 }
 
 test "semantic prompt new_command at column zero" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1590,7 +1592,7 @@ test "semantic prompt new_command at column zero" {
 }
 
 test "semantic prompt end_prompt_start_input_terminate_eol clears on linefeed" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1606,7 +1608,7 @@ test "semantic prompt end_prompt_start_input_terminate_eol clears on linefeed" {
 }
 
 test "bell effect callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     // Test bell with null callback (default readonly effects) doesn't crash
@@ -1799,7 +1801,7 @@ test "clipboard_write allocation failure is ignored" {
 }
 
 test "request mode DECRQM with write_pty callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     // Without callback, DECRQM should not crash
@@ -1849,7 +1851,7 @@ test "request mode DECRQM with write_pty callback" {
 test "stream: CSI W with intermediate but no params" {
     // Regression test from AFL++ crash. CSI ? W without
     // parameters caused an out-of-bounds access on input.params[0].
-    var t: Terminal = try .init(testing.allocator, .{
+    var t: Terminal = try .init(testing.io, testing.allocator, .{
         .cols = 80,
         .rows = 24,
         .max_scrollback = 100,
@@ -1863,7 +1865,7 @@ test "stream: CSI W with intermediate but no params" {
 }
 
 test "window_title effect is called" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1887,7 +1889,7 @@ test "window_title effect is called" {
 }
 
 test "window_title effect not called without callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -1907,7 +1909,7 @@ test "window_title effect not called without callback" {
 }
 
 test "window_title effect with empty title" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1931,7 +1933,7 @@ test "window_title effect with empty title" {
 }
 
 test "kitty_keyboard_query" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1960,7 +1962,7 @@ test "kitty_keyboard_query" {
 }
 
 test "xtversion default" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1983,7 +1985,7 @@ test "xtversion default" {
 }
 
 test "xtversion with effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2009,7 +2011,7 @@ test "xtversion with effect" {
 }
 
 test "xtversion with empty string effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2036,7 +2038,7 @@ test "xtversion with empty string effect" {
 }
 
 test "size report csi_14_t with effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2064,7 +2066,7 @@ test "size report csi_14_t with effect" {
 }
 
 test "size report csi_16_t with effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2092,7 +2094,7 @@ test "size report csi_16_t with effect" {
 }
 
 test "size report csi_18_t with effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2120,7 +2122,7 @@ test "size report csi_18_t with effect" {
 }
 
 test "size report no effect callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2143,7 +2145,7 @@ test "size report no effect callback" {
 }
 
 test "size report csi_21_t title" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2170,7 +2172,7 @@ test "size report csi_21_t title" {
 }
 
 test "enquiry no effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2193,7 +2195,7 @@ test "enquiry no effect" {
 }
 
 test "enquiry with effect" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2220,7 +2222,7 @@ test "enquiry with effect" {
 }
 
 test "enquiry with empty response" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2247,7 +2249,7 @@ test "enquiry with empty response" {
 }
 
 test "device status: operating status" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2272,7 +2274,7 @@ test "device status: operating status" {
 }
 
 test "device status: cursor position" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2302,7 +2304,7 @@ test "device status: cursor position" {
 }
 
 test "device status: cursor position with origin mode" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2334,7 +2336,7 @@ test "device status: cursor position with origin mode" {
 }
 
 test "device status: color scheme dark" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2363,7 +2365,7 @@ test "device status: color scheme dark" {
 }
 
 test "device status: color scheme light" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2392,7 +2394,7 @@ test "device status: color scheme light" {
 }
 
 test "device status: color scheme without callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2417,7 +2419,7 @@ test "device status: color scheme without callback" {
 }
 
 test "device status: readonly ignores all" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -2436,7 +2438,7 @@ test "device status: readonly ignores all" {
 }
 
 test "device attributes: primary DA" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2464,7 +2466,7 @@ test "device attributes: primary DA" {
 }
 
 test "device attributes: secondary DA" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2492,7 +2494,7 @@ test "device attributes: secondary DA" {
 }
 
 test "device attributes: tertiary DA" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2520,7 +2522,7 @@ test "device attributes: tertiary DA" {
 }
 
 test "device attributes: readonly ignores" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -2539,7 +2541,7 @@ test "device attributes: readonly ignores" {
 }
 
 test "device attributes: custom response" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2581,7 +2583,7 @@ test "device attributes: custom response" {
 test "kitty graphics APC response" {
     if (comptime !build_options.kitty_graphics) return error.SkipZigTest;
 
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -2610,7 +2612,7 @@ test "kitty graphics APC response" {
 test "kitty graphics via APC" {
     if (comptime !build_options.kitty_graphics) return error.SkipZigTest;
 
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     const handler: Handler = .init(&t);

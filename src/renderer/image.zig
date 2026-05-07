@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const assert = @import("../quirks.zig").inlineAssert;
 const wuffs = @import("wuffs");
 const terminal = @import("../terminal/main.zig");
+const global = @import("../global.zig");
 
 const Renderer = @import("../renderer.zig").Renderer;
 const GraphicsAPI = Renderer.API;
