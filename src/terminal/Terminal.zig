@@ -2179,6 +2179,7 @@ pub fn print(self: *Terminal, c: u21) !void {
             if (!emoji) return;
         }
 
+        self.screens.active.cursorMarkDirty();
         try self.screens.active.appendGrapheme(prev, c);
         return;
     }
@@ -6296,6 +6297,18 @@ test "Terminal: caps zero-width codepoints attached to one cell" {
     );
 }
 
+test "Terminal: zero-width character marks dirty without grapheme clustering" {
+    var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 4 });
+    defer t.deinit(testing.allocator);
+
+    t.modes.set(.grapheme_cluster, false);
+    try t.print('e');
+    t.clearDirty();
+
+    try t.print(0x0301); // Combining acute accent.
+    try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
+}
+
 // https://github.com/mitchellh/ghostty/issues/1400
 test "Terminal: print single very long line" {
     var t = try init(testing.io, testing.allocator, .{ .rows = 5, .cols = 5 });
@@ -6700,7 +6713,7 @@ test "Terminal: VS16 doesn't make character with 2027 disabled" {
     }
 }
 
-test "Terminal: ignored VS16 doesn't mark dirty" {
+test "Terminal: VS16 with 2027 disabled marks dirty" {
     var t = try init(testing.io, testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
@@ -6710,9 +6723,11 @@ test "Terminal: ignored VS16 doesn't mark dirty" {
     try t.print(0x2764); // Heart
     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
 
+    // VS16 doesn't make the cell wide, but it is still attached to the
+    // cell and changes its presentation, so the row must be redrawn.
     t.clearDirty();
-    try t.print(0xFE0F); // VS16 to make wide
-    try testing.expect(!t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
+    try t.print(0xFE0F); // VS16
+    try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
 }
 
 test "Terminal: print invalid VS16 non-grapheme" {
